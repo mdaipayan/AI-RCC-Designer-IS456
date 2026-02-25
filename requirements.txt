@@ -2,5 +2,4 @@ streamlit>=1.32.0
 pandas
 matplotlib
 numpy
-pygad
-shapely
+PyMuPDF  # <-- Add this for PDF processing
