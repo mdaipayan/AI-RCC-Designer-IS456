@@ -1,0 +1,8 @@
+numpy
+pandas
+matplotlib
+streamlit
+pynite        # For 3D Structural Analysis
+scipy         # For optimization functions
+pygad         # Genetic Algorithm for plan optimization
+shapely       # For geometric operations (plot boundaries/setbacks)
