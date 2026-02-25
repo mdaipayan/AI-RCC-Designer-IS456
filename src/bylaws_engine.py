@@ -1,30 +1,30 @@
-class BuildingBylaws:
-    def __init__(self, plot_width, plot_depth, building_type="Residential"):
-        self.w = plot_width
-        self.d = plot_depth
-        self.type = building_type
-
-    def get_setbacks(self):
-        """Standard setbacks based on plot size (Example values)"""
-        if self.w * self.d < 250: # Plots < 250 sqm
-            return {'front': 3.0, 'rear': 2.0, 'sides': 1.5}
-        else:
-            return {'front': 4.5, 'rear': 3.0, 'sides': 2.0}
-
-    def calculate_footprint(self):
-        sb = self.get_setbacks()
-        effective_w = self.w - (2 * sb['sides'])
-        effective_d = self.d - (sb['front'] + sb['rear'])
+class PlotManager:
+    """Calculates the legal building envelope based on Indian Building Bylaws."""
+    
+    def __init__(self, width, depth, city_zone="Zone_A"):
+        self.plot_width = width
+        self.plot_depth = depth
+        self.total_area = width * depth
         
-        if effective_w <= 0 or effective_d <= 0:
-            return "Plot too small for standard setbacks."
-            
+    def get_constraints(self):
+        # Example NBC (National Building Code) Setbacks for residential
+        if self.total_area < 200:
+            return {'front': 2.0, 'rear': 1.5, 'sides': 1.0}
+        else:
+            return {'front': 3.0, 'rear': 2.5, 'sides': 2.0}
+
+    def get_max_footprint(self):
+        sb = self.get_constraints()
+        b_width = self.plot_width - (2 * sb['sides'])
+        b_depth = self.plot_depth - (sb['front'] + sb['rear'])
+        
         return {
-            "max_width": round(effective_w, 2),
-            "max_depth": round(effective_d, 2),
-            "area": round(effective_w * effective_d, 2)
+            "buildable_width": b_width,
+            "buildable_depth": b_depth,
+            "ground_coverage_sqm": b_width * b_depth,
+            "fsi_allowed": 1.5 # Example Floor Space Index
         }
 
-# Educational Example:
-plot = BuildingBylaws(12.0, 18.0) # A standard 40x60 ft plot approx
-print(f"Buildable Footprint: {plot.calculate_footprint()}")
+# Educational Check
+my_plot = PlotManager(15.0, 20.0) # 300 sqm plot
+print(f"Max Building Dimensions: {my_plot.get_max_footprint()}")
