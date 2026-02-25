@@ -16,9 +16,16 @@ col_draw, col_rules = st.columns([2, 1])
 
 with col_rules:
     st.header("1. Environment & Rules")
-    st.info("Set the local municipal bylaws.")
     
-    # Setbacks dictate how far from the property line we can build
+    # Let the user choose between straight lines and curves
+    draw_mode_ui = st.radio(
+        "Drawing Tool", 
+        ["📏 Polygon (Straight Lines)", "✏️ Freedraw (Curved Corners)"]
+    )
+    canvas_mode = "polygon" if "Polygon" in draw_mode_ui else "freedraw"
+    
+    st.markdown("---")
+    st.info("Set the local municipal bylaws.")
     uniform_setback = st.number_input("Uniform Setback (m)", min_value=0.5, value=1.5, step=0.5)
     
     st.markdown("---")
@@ -27,17 +34,20 @@ with col_rules:
 
 with col_draw:
     st.header("2. Draw Plot Boundary")
-    st.caption("Click to place corners. Double-click to close the polygon shape. (Grid scale: 1 pixel = 0.1m)")
+    if canvas_mode == "polygon":
+        st.caption("Click to place corners. Double-click to close the shape. (Scale: 1px = 0.1m)")
+    else:
+        st.caption("Click and drag to draw custom curves. Make sure to close the loop! (Scale: 1px = 0.1m)")
     
-    # The Interactive Canvas
+    # The Interactive Canvas (Now supports dynamically changing modes)
     canvas_result = st_canvas(
-        fill_color="rgba(46, 204, 113, 0.3)",  # Light Green Fill
-        stroke_width=2,
+        fill_color="rgba(46, 204, 113, 0.3)",  
+        stroke_width=3,
         stroke_color="#27ae60",
         background_color="#f1f2f6",
         height=400,
         width=600,
-        drawing_mode="polygon",
+        drawing_mode=canvas_mode,
         key="plot_canvas",
     )
 
@@ -47,30 +57,38 @@ with col_draw:
 st.markdown("---")
 st.header("3. AI Plan Generation")
 
-# Extract the drawn shape from the canvas
 if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
     objects = canvas_result.json_data["objects"]
     
     if len(objects) > 0:
-        # Get the path data of the drawn polygon
+        # Get the path data of the drawn shape
+        # If freedraw is used, multiple objects might exist. We merge them or take the largest/last closed loop.
+        # For simplicity, we'll take the most recently drawn object.
         path = objects[-1]["path"]
         raw_points = []
         
-        # Parse the SVG-style path data from the canvas
+        # SMARTER SVG PARSER: Can now read Lines (L), Moves (M), and Bezier Curves (Q, C)
         for cmd in path:
-            if cmd[0] in ['M', 'L']: # M = Move to (start), L = Line to (corner)
-                raw_points.append((cmd[1], cmd[2]))
+            if cmd[0] in ['Z', 'z']: # Z means close path, no coordinates attached
+                continue
+            if len(cmd) >= 3:
+                # In SVG paths, the last two numbers of any command are the final X, Y coordinates
+                x, y = cmd[-2], cmd[-1]
+                raw_points.append((x, y))
                 
         if len(raw_points) >= 3:
-            # 1. Scale pixels to real-world meters (e.g., 10px = 1m)
+            # 1. Scale pixels to real-world meters
             scale = 0.1
-            real_points = [(x * scale, (400 - y) * scale) for x, y in raw_points] # Invert Y-axis for standard math
+            real_points = [(x * scale, (400 - y) * scale) for x, y in raw_points] 
             
             # 2. Create the Plot Polygon using Shapely
             plot_poly = Polygon(real_points)
             
-            # 3. Calculate Buildable Envelope by shrinking the polygon (Negative Buffer)
-            # The buffer() function mathematically offsets the boundary inward
+            # If the user drew a messy freedraw line that crosses itself, simplify it
+            if not plot_poly.is_valid:
+                plot_poly = plot_poly.buffer(0) 
+            
+            # 3. Calculate Buildable Envelope by shrinking the polygon
             buildable_poly = plot_poly.buffer(-uniform_setback)
             
             col_stats, col_viz = st.columns([1, 2])
@@ -85,17 +103,14 @@ if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
             
             # 4. AI Grid Generation Logic
             if not buildable_poly.is_empty:
-                # Find the bounding box of the buildable area
                 minx, miny, maxx, maxy = buildable_poly.bounds
                 
-                # Calculate number of bays needed
                 nx = int(np.ceil((maxx - minx) / max_span))
                 ny = int(np.ceil((maxy - miny) / max_span))
                 
                 spacing_x = (maxx - minx) / nx if nx > 0 else max_span
                 spacing_y = (maxy - miny) / ny if ny > 0 else max_span
                 
-                # Generate columns ONLY if they fall inside the buildable polygon
                 ai_columns_x, ai_columns_y = [], []
                 
                 for i in range(nx + 1):
@@ -113,19 +128,19 @@ if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
                 with col_viz:
                     fig, ax = plt.subplots(figsize=(8, 6))
                     
-                    # Plot the Property Line (Red)
-                    x_plot, y_plot = plot_poly.exterior.xy
-                    ax.plot(x_plot, y_plot, color='red', linewidth=2, label="Property Line")
+                    # Plot Property Line (Red)
+                    if plot_poly.geom_type == 'Polygon':
+                        x_plot, y_plot = plot_poly.exterior.xy
+                        ax.plot(x_plot, y_plot, color='red', linewidth=2, label="Property Line")
                     
-                    # Plot the Setback / Buildable Line (Blue Dashed)
-                    x_build, y_build = buildable_poly.exterior.xy
-                    ax.plot(x_build, y_build, color='blue', linestyle='--', linewidth=2, label="Setback Line")
+                    # Plot Buildable Line (Blue Dashed)
+                    if buildable_poly.geom_type == 'Polygon':
+                        x_build, y_build = buildable_poly.exterior.xy
+                        ax.plot(x_build, y_build, color='blue', linestyle='--', linewidth=2, label="Setback Line")
                     
-                    # Plot the AI Columns (Black Squares)
+                    # Plot AI Columns
                     if ai_columns_x:
                         ax.scatter(ai_columns_x, ai_columns_y, color='black', marker='s', s=80, label="RCC Columns", zorder=5)
-                        
-                        # Draw structural grid lines connecting the columns
                         for x in set(ai_columns_x):
                             ax.axvline(x=x, color='gray', linestyle=':', alpha=0.4)
                         for y in set(ai_columns_y):
@@ -139,7 +154,7 @@ if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
                     st.pyplot(fig)
                     
                     if ai_columns_x:
-                        st.info(f"📐 AI successfully placed **{len(ai_columns_x)} columns** with an average span of {spacing_x:.1f}m x {spacing_y:.1f}m inside your custom shape.")
+                        st.info(f"📐 AI successfully placed **{len(ai_columns_x)} columns** inside your curved geometry.")
 
     else:
         st.warning("Please draw a closed shape on the canvas above.")
