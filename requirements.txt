@@ -2,4 +2,5 @@ streamlit>=1.32.0
 pandas
 matplotlib
 numpy
-PyMuPDF  # <-- Add this for PDF processing
+streamlit-drawable-canvas
+shapely
